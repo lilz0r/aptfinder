@@ -5,14 +5,11 @@ from email.mime.text import MIMEText
 from getpass         import getpass
 from smtplib         import SMTP_SSL
 
-
-import urllib2, re, sys
+import urllib2, re, sys, os, getopt
 from bs4 import BeautifulSoup
 
-def sendEmail(toSend, message):
-	#login, password = 'thelilz0r@gmail.com', getpass('Gmail password:')
-	login, password = 'YOUREMAIL@gmail.com', 'PASSWORDGOESHERE'
-
+#send an email via gmail
+def sendEmail(toSend, message, login, password):
 	# create message
 	msg = MIMEText(message, _charset='utf-8')
 	msg['Subject'] = Header('Craigslist Apt Ad', 'utf-8')
@@ -25,110 +22,107 @@ def sendEmail(toSend, message):
 	try:
 	    s.login(login, password)
 	    s.sendmail(msg['From'], msg['To'], msg.as_string())
+	    print "sent email to: "+toSend 
 	finally:
 	    s.quit()
 
-# Testing:
-#sendEmail('tim108@gmail.com', "HEY")
-
-
+#scrapes page
 def scrapePage(url):
 	page = urllib2.urlopen(url)
 	soup = BeautifulSoup(page.read())
 	return soup
 
-
+#removes duplicates from a list
 def removeduplicates(lst):
 	lst = list(set(lst))
 	return lst
 
+#grabs stored links in a set from a specified temp file location
+def grabstoredlinks(tempfile):
+	storedlinks = [] #init and read from a file...
+	k = 0
 
-storedlinks = [] #init and read from a file...
+	fo = open(tempfile, 'w+')
+	for line in fo.readlines():
+		#print k
+		k += 1
+		if len(line) == 52:
+			storedlinks.append(line[0:51])
+	fo.close()
+	return storedlinks
 
-import os
-k = 0
+#gets all links from a craigslist url 
+def getlinks(craigslisturl):
+	mainsoup = scrapePage(craigslisturl)
+	links = [ each.get('href') for each in mainsoup.findAll('a') ]
+	return links
 
-#CHANGE THIS DOCUMENT TO YOUR OWN THING
-fo = open('/Users/lily/Documents/workspace/foo.txt', 'r')
-for line in fo.readlines():
-	#print k
-	k += 1
-	if len(line) == 52:
-		storedlinks.append(line[0:51])
-fo.close()
+#stores new links to storedlinks
+def storenewlinks(links, storedlinks):
+	for link in links:
+		if "html" in str(link):
+			storedlinks.append(link)
+	return storedlinks
 
-origset = set(storedlinks)
-
-
-mainsoup = scrapePage('http://sfbay.craigslist.org/search/roo/sfc?query=&srchType=A&minAsk=600&maxAsk=1100&nh=1&nh=149&nh=4&nh=11&nh=10&nh=18&nh=21&nh=23')
-
-links = [ each.get('href') for each in mainsoup.findAll('a') ]
-
-#berksoup = scrapePage('http://sfbay.craigslist.org/search/roo?query=berkeley&srchType=A&minAsk=400&maxAsk=800')
-
-eastbaysoup = scrapePage('http://sfbay.craigslist.org/search/roo/eby?maxAsk=800&minAsk=400&srchType=A')
-
-#blinks = [ each.get('href') for each in berksoup.findAll('a') ]
-
-elinks = [ each.get('href') for each in eastbaysoup.findAll('a') ]
-
-for link in elinks:
-	links.append(link)
-
-
-
-
-#print links
-
-
-#returnemail = [ eachone.get() for eachone in [ each.get('class') for each in mainsoup.findAll('span') ] ]
-#problem... it keeps visiting craiglist pages it's visited before. maybe I need to strip the strings? maybe 
-#I need to print everything it's drawing out from the links AND foo.txt?
-
+#finds the email address of the ad given the url of the ad
 def findemail(link):
 	soup = scrapePage(link)
-	print "visited new craigslist page"
 	emailarray = soup.findAll(text=re.compile("@"))
+	#print "emailarray", emailarray
 	if len(emailarray):
-		text = str(emailarray[0])
+		text = str(emailarray[-1])
 		if len(text) == 36:				
 			email = text
+			#print "email", email
 			return email
 
-for link in links:
-	if "html" in str(link):
-		storedlinks.append(link)
+#send emails to ads that you have not emailed before
+def sendNewEmails(message, difflst, login, password):
+	for link in difflst:
+		#print "link: ", link
+		email = findemail(link)
+		#print "found an email! about to send to...", email
+		if email:
+			sendEmail(email, message, login, password) #replace with your own message
 
-print len(storedlinks)
+#gets the new list of urls for this run are from storedlinks
+def getnewlst(storedlinks):
+	newset = set(storedlinks)
+	newlst = list(newset)
+	return newlst
 
-newset = set(storedlinks)
+#use set difference to find what the new URLs to visit are.
+def getdifflst(storedlinks, origstoredset):
+	newset = set(storedlinks)
+	diffset = newset.difference(origstoredset)
+	difflst = list(diffset)
+	return difflst
 
-newlst = list(newset)
+#set up, hardcoded info + cleanup
+def main():
+	filedir = "/Users/lily/Documents/workspace/"
+	tempfile = filedir+'temp.txt'
+	login, password = '', '' #sample test account for sending emails 
+	storedlinks = grabstoredlinks(tempfile)
+	origstoredset = set(storedlinks)
+	craigslisturl = 'http://sfbay.craigslist.org/search/roo/sfc?query=&srchType=A&minAsk=600&maxAsk=1100&nh=1&nh=149&nh=4&nh=11&nh=10&nh=18&nh=21&nh=23'
+	links = getlinks(craigslisturl)
+	updatedstoredlinks = storenewlinks(links, storedlinks)
+	newlst = getnewlst(updatedstoredlinks)
+	difflst = getdifflst(updatedstoredlinks, origstoredset)
+	message = "Hi! I'm interested in this apartment!"
+	sendNewEmails(message, difflst, login, password)
+	#now cleanup and overwrite tempfile
+	os.remove(tempfile)
+	j = 0
+	fo = open(tempfile, 'wb+')
+	for line in newlst:
+		j += 1
+		fo.write(line+'\n');
+	fo.close()
 
-print len(newlst)
-
-diffset = newset.difference(origset)
-
-difflst = list(diffset)
-
-print "difflst: ", difflst
-#now visit difflst and go email them
+if __name__ == "__main__":
+   sys.exit(main())
 
 
-for link in difflst:
-	email = findemail(link)
-	if email:
-		sendEmail(email, "MESSAGE GOES HERE")
-		print "email!"
-
-os.remove('/Users/lily/Documents/workspace/foo.txt')
-
-j = 0
-
-fo = open('/Users/lily/Documents/workspace/foo.txt', 'wb+')
-for line in newlst:
-	#print j
-	j += 1
-	fo.write(line+'\n');
-fo.close()
 
